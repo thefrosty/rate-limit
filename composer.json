@@ -1,0 +1,31 @@
+{
+  "name": "thefrosty/rate-limit",
+  "type": "wordpress-muplugin",
+  "description": ".",
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "Austin Passy",
+      "email": "thefrosty@users.noreply.github.com",
+      "homepage": "https://austin.passy.co/"
+    }
+  ],
+  "config": {
+    "allow-plugins": {
+      "roots/wordpress-core-installer": true
+    },
+    "optimize-autoloader": true,
+    "platform": {
+      "php": "8.4"
+    },
+    "preferred-install": "dist",
+    "sort-packages": true
+  },
+  "require": {
+    "php": "^8.4",
+    "thefrosty/wp-utilities": "^3.11"
+  },
+  "require-dev": {
+    "roots/wordpress": "^6.7"
+  }
+}
