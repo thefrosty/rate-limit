@@ -30,6 +30,6 @@
     "roots/wordpress": "^6.7"
   },
   "scripts": {
-    "test": "phpunit"
+    "test": "/vendor/bin/phpunit"
   }
 }
