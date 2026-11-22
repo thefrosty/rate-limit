@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace TheFrosty\RateLimit\Tests;
 
-use PHPUnit\Framework\Attributes\DataProvider;
 use stdClass;
 use Symfony\Component\HttpFoundation\Request;
 use const TheFrosty\RateLimit\MAX_REQUESTS_PER_MINUTE;
@@ -73,7 +72,9 @@ final class RateLimitTest extends TestCase
         yield 'IPv6 loopback' => ['::1'];
     }
 
-    #[DataProvider('neverLimitedIps')]
+    /**
+     * @dataProvider neverLimitedIps
+     */
     public function test_loopback_is_never_limited(string $ip): void
     {
         $allowed = self::allowedBeforeLimit(static fn(): Request => self::request(server: ['REMOTE_ADDR' => $ip]));
@@ -91,7 +92,9 @@ final class RateLimitTest extends TestCase
         yield 'OPTIONS' => ['OPTIONS'];
     }
 
-    #[DataProvider('skippedMethods')]
+    /**
+     * @dataProvider skippedMethods
+     */
     public function test_head_and_options_are_not_counted(string $method): void
     {
         self::assertNull(self::send(self::request(method: $method)));
