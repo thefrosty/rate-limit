@@ -54,7 +54,7 @@ abstract class TestCase extends WP_UnitTestCase
 
     protected static function transientKey(string $ip): string
     {
-        return sprintf('_thefrosty_rate_limit_%s', sanitize_key($ip));
+        return sprintf('_thefrosty_rate_limit_%s', md5($ip));
     }
 
     /**

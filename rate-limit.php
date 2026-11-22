@@ -17,21 +17,34 @@ namespace TheFrosty\RateLimit;
 use stdClass;
 use Symfony\Component\HttpFoundation\Request;
 use WP_Http;
+use function apply_filters;
+use function array_filter;
+use function array_key_exists;
+use function array_values;
 use function current_user_can;
 use function defined;
+use function filter_var;
 use function function_exists;
 use function header;
 use function headers_sent;
 use function in_array;
+use function is_array;
 use function is_object;
+use function is_string;
 use function is_user_logged_in;
-use function sanitize_key;
+use function ltrim;
+use function rawurldecode;
+use function max;
+use function md5;
 use function sprintf;
 use function str_contains;
-use function TheFrosty\WpUtilities\getIpAddress;
+use function str_starts_with;
+use function strlen;
+use function substr;
 use function TheFrosty\WpUtilities\getRequest;
 use function time;
 use function wp_send_json;
+use const FILTER_VALIDATE_IP;
 use const MINUTE_IN_SECONDS;
 use const WP_CLI;
 
@@ -42,13 +55,69 @@ const NEVER_RATE_LIMITED_IPS = [
 ];
 
 /**
+ * Resolve the client IP without trusting client-supplied headers.
+ * Uses REMOTE_ADDR unless REMOTE_ADDR is a proxy registered via the `thefrosty/rate_limit/trusted_proxies`
+ * filter (IPs or CIDR ranges), in which case the X-Forwarded-For chain is walked by Symfony.
+ * @param Request $request
+ * @return string|null
+ */
+function getClientIp(Request $request): ?string
+{
+    $proxies = apply_filters('thefrosty/rate_limit/trusted_proxies', []);
+    if (is_array($proxies) && $proxies !== []) {
+        Request::setTrustedProxies(array_values(array_filter($proxies, 'is_string')), Request::HEADER_X_FORWARDED_FOR);
+    }
+
+    $ip = $request->getClientIp();
+
+    return is_string($ip) && filter_var($ip, FILTER_VALIDATE_IP) !== false ? $ip : null;
+}
+
+/**
+ * Whether the request will be dispatched to the core Site Health REST namespace.
+ * WordPress lets a `rest_route` query/body parameter override the pretty-permalink path, so it must be checked too;
+ * matching on the raw REQUEST_URI let `/wp-json/wp-site-health?rest_route=/any/route` skip the limiter.
+ * @param Request $request
+ * @return bool
+ */
+function isSiteHealthRequest(Request $request): bool
+{
+    $routes = [];
+    foreach ([$request->query->all(), $request->request->all()] as $params) {
+        if (array_key_exists('rest_route', $params)) {
+            if (!is_string($params['rest_route'])) {
+                return false;
+            }
+            $routes[] = $params['rest_route'];
+        }
+    }
+
+    if ($routes === []) {
+        $path = $request->getPathInfo();
+        if (!str_starts_with($path, '/wp-json/')) {
+            return false;
+        }
+        $routes[] = substr($path, strlen('/wp-json'));
+    }
+
+    foreach ($routes as $route) {
+        $route = '/' . ltrim(rawurldecode($route), '/');
+        if (str_contains($route, '..') || !str_starts_with($route, '/wp-site-health/')) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/**
  * Maybe send a Rate-Limit header and return a JSON 429 response.
  * @param Request|null $request
  */
 function maybeRateLimit(?Request $request = null): void
 {
     $request ??= getRequest();
-    $ip = getIpAddress($request);
+    $ip = getClientIp($request);
 
     if (
         // Wrap with function_exists in case we call this earlier then it's available.
@@ -56,7 +125,7 @@ function maybeRateLimit(?Request $request = null): void
         (defined('DOING_CRON') && DOING_CRON) ||
         (defined('WP_CLI') && WP_CLI) ||
         in_array($request->getMethod(), ['HEAD', 'OPTIONS'], true) ||
-        str_starts_with($request->server->get('REQUEST_URI'), '/wp-json/wp-site-health')
+        isSiteHealthRequest($request)
     ) {
         return;
     }
@@ -69,7 +138,8 @@ function maybeRateLimit(?Request $request = null): void
         return;
     }
 
-    $transient = sprintf('_thefrosty_rate_limit_%s', sanitize_key($ip));
+    // Hash the IP: sanitize_key() strips ':' so distinct IPv6 addresses (e.g. 1:23:: and 12:3::) shared a bucket.
+    $transient = sprintf('_thefrosty_rate_limit_%s', md5($ip));
     $rate_limit = get_transient($transient);
 
     // Increment the current IP count.
@@ -92,7 +162,7 @@ function maybeRateLimit(?Request $request = null): void
     if ($rate_limit === false) {
         $rate_limit = new stdClass();
         $rate_limit->limits[$ip] = [
-            'count' => 0,
+            'count' => 1, // This request counts toward the limit.
             'start_time' => time(),
         ];
         set_transient($transient, $rate_limit, MINUTE_IN_SECONDS);
@@ -109,7 +179,7 @@ function maybeRateLimit(?Request $request = null): void
     if (!headers_sent()) {
         header(sprintf('X-RateLimit-Reset: %d', $rate_limit->limits[$ip]['start_time'] + MINUTE_IN_SECONDS));
         header(
-            sprintf('Retry-After: %d', absint((time() - MINUTE_IN_SECONDS) - $rate_limit->limits[$ip]['start_time']))
+            sprintf('Retry-After: %d', max(0, $rate_limit->limits[$ip]['start_time'] + MINUTE_IN_SECONDS - time()))
         );
     }
 
