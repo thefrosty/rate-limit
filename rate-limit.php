@@ -19,6 +19,7 @@ use Symfony\Component\HttpFoundation\Request;
 use WP_Http;
 use function apply_filters;
 use function array_filter;
+use function array_key_exists;
 use function array_values;
 use function current_user_can;
 use function defined;
@@ -31,9 +32,14 @@ use function is_array;
 use function is_object;
 use function is_string;
 use function is_user_logged_in;
+use function ltrim;
+use function rawurldecode;
 use function sanitize_key;
 use function sprintf;
 use function str_contains;
+use function str_starts_with;
+use function strlen;
+use function substr;
 use function TheFrosty\WpUtilities\getRequest;
 use function time;
 use function wp_send_json;
@@ -67,6 +73,43 @@ function getClientIp(Request $request): ?string
 }
 
 /**
+ * Whether the request will be dispatched to the core Site Health REST namespace.
+ * WordPress lets a `rest_route` query/body parameter override the pretty-permalink path, so it must be checked too;
+ * matching on the raw REQUEST_URI let `/wp-json/wp-site-health?rest_route=/any/route` skip the limiter.
+ * @param Request $request
+ * @return bool
+ */
+function isSiteHealthRequest(Request $request): bool
+{
+    $routes = [];
+    foreach ([$request->query->all(), $request->request->all()] as $params) {
+        if (array_key_exists('rest_route', $params)) {
+            if (!is_string($params['rest_route'])) {
+                return false;
+            }
+            $routes[] = $params['rest_route'];
+        }
+    }
+
+    if ($routes === []) {
+        $path = $request->getPathInfo();
+        if (!str_starts_with($path, '/wp-json/')) {
+            return false;
+        }
+        $routes[] = substr($path, strlen('/wp-json'));
+    }
+
+    foreach ($routes as $route) {
+        $route = '/' . ltrim(rawurldecode($route), '/');
+        if (str_contains($route, '..') || !str_starts_with($route, '/wp-site-health/')) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/**
  * Maybe send a Rate-Limit header and return a JSON 429 response.
  * @param Request|null $request
  */
@@ -81,7 +124,7 @@ function maybeRateLimit(?Request $request = null): void
         (defined('DOING_CRON') && DOING_CRON) ||
         (defined('WP_CLI') && WP_CLI) ||
         in_array($request->getMethod(), ['HEAD', 'OPTIONS'], true) ||
-        str_starts_with($request->server->get('REQUEST_URI'), '/wp-json/wp-site-health')
+        isSiteHealthRequest($request)
     ) {
         return;
     }
