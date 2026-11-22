@@ -3,4 +3,4 @@
 /vendor
 /wordpress
 composer.lock
-/.phpunit.cache
+/tests/.phpunit.cache
