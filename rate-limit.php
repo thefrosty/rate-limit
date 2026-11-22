@@ -34,7 +34,8 @@ use function is_string;
 use function is_user_logged_in;
 use function ltrim;
 use function rawurldecode;
-use function sanitize_key;
+use function max;
+use function md5;
 use function sprintf;
 use function str_contains;
 use function str_starts_with;
@@ -137,7 +138,8 @@ function maybeRateLimit(?Request $request = null): void
         return;
     }
 
-    $transient = sprintf('_thefrosty_rate_limit_%s', sanitize_key($ip));
+    // Hash the IP: sanitize_key() strips ':' so distinct IPv6 addresses (e.g. 1:23:: and 12:3::) shared a bucket.
+    $transient = sprintf('_thefrosty_rate_limit_%s', md5($ip));
     $rate_limit = get_transient($transient);
 
     // Increment the current IP count.
@@ -160,7 +162,7 @@ function maybeRateLimit(?Request $request = null): void
     if ($rate_limit === false) {
         $rate_limit = new stdClass();
         $rate_limit->limits[$ip] = [
-            'count' => 0,
+            'count' => 1, // This request counts toward the limit.
             'start_time' => time(),
         ];
         set_transient($transient, $rate_limit, MINUTE_IN_SECONDS);
@@ -177,7 +179,7 @@ function maybeRateLimit(?Request $request = null): void
     if (!headers_sent()) {
         header(sprintf('X-RateLimit-Reset: %d', $rate_limit->limits[$ip]['start_time'] + MINUTE_IN_SECONDS));
         header(
-            sprintf('Retry-After: %d', absint((time() - MINUTE_IN_SECONDS) - $rate_limit->limits[$ip]['start_time']))
+            sprintf('Retry-After: %d', max(0, $rate_limit->limits[$ip]['start_time'] + MINUTE_IN_SECONDS - time()))
         );
     }
 

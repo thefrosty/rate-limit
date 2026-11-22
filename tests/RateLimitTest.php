@@ -44,7 +44,7 @@ final class RateLimitTest extends TestCase
 
     private static function transientKey(string $ip): string
     {
-        return sprintf('_thefrosty_rate_limit_%s', sanitize_key($ip));
+        return sprintf('_thefrosty_rate_limit_%s', md5($ip));
     }
 
     /**
@@ -69,7 +69,7 @@ final class RateLimitTest extends TestCase
 
         $data = WpStub::$transients[self::transientKey(self::CLIENT_IP)] ?? null;
         self::assertIsObject($data);
-        self::assertSame(0, $data->limits[self::CLIENT_IP]['count']);
+        self::assertSame(1, $data->limits[self::CLIENT_IP]['count']);
         self::assertEqualsWithDelta(time(), $data->limits[self::CLIENT_IP]['start_time'], 2);
     }
 
@@ -77,8 +77,7 @@ final class RateLimitTest extends TestCase
     {
         $allowed = self::allowedBeforeLimit(static fn(): Request => self::request());
 
-        // Current behaviour: the first request is counted as 0, so MAX + 1 requests get through.
-        self::assertSame(MAX_REQUESTS_PER_MINUTE + 1, $allowed);
+        self::assertSame(MAX_REQUESTS_PER_MINUTE, $allowed);
 
         try {
             maybeRateLimit(self::request());
@@ -92,7 +91,7 @@ final class RateLimitTest extends TestCase
     public function testHtmlClientsGetWpDie429(): void
     {
         $factory = static fn(): Request => self::request('/', 'GET', ['HTTP_ACCEPT' => 'text/html']);
-        for ($i = 0; $i <= MAX_REQUESTS_PER_MINUTE; $i++) {
+        for ($i = 0; $i < MAX_REQUESTS_PER_MINUTE; $i++) {
             maybeRateLimit($factory());
         }
 
@@ -120,6 +119,15 @@ final class RateLimitTest extends TestCase
         // A different client is unaffected by the first client being limited.
         maybeRateLimit(self::request(server: ['REMOTE_ADDR' => '198.51.100.7']));
         self::assertArrayHasKey(self::transientKey('198.51.100.7'), WpStub::$transients);
+    }
+
+    public function testIpv6AddressesThatSanitizeAlikeHaveSeparateBuckets(): void
+    {
+        // sanitize_key() reduces both of these to "123".
+        self::allowedBeforeLimit(static fn(): Request => self::request(server: ['REMOTE_ADDR' => '1:23::']));
+
+        maybeRateLimit(self::request(server: ['REMOTE_ADDR' => '12:3::']));
+        self::assertCount(2, WpStub::$transients);
     }
 
     /**
