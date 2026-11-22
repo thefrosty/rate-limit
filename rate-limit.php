@@ -25,6 +25,7 @@ use function headers_sent;
 use function in_array;
 use function is_object;
 use function is_user_logged_in;
+use function max;
 use function sanitize_key;
 use function sprintf;
 use function str_contains;
@@ -107,10 +108,10 @@ function maybeRateLimit(?Request $request = null): void
     }
 
     if (!headers_sent()) {
-        header(sprintf('X-RateLimit-Reset: %d', $rate_limit->limits[$ip]['start_time'] + MINUTE_IN_SECONDS));
-        header(
-            sprintf('Retry-After: %d', absint((time() - MINUTE_IN_SECONDS) - $rate_limit->limits[$ip]['start_time']))
-        );
+        $reset = $rate_limit->limits[$ip]['start_time'] + MINUTE_IN_SECONDS;
+        header(sprintf('X-RateLimit-Reset: %d', $reset));
+        // Seconds until the window resets (never negative).
+        header(sprintf('Retry-After: %d', max(0, $reset - time())));
     }
 
     if (str_contains($request->headers->get('Accept', '*/*'), 'html')) {
