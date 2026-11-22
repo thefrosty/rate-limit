@@ -17,21 +17,27 @@ namespace TheFrosty\RateLimit;
 use stdClass;
 use Symfony\Component\HttpFoundation\Request;
 use WP_Http;
+use function apply_filters;
+use function array_filter;
+use function array_values;
 use function current_user_can;
 use function defined;
+use function filter_var;
 use function function_exists;
 use function header;
 use function headers_sent;
 use function in_array;
+use function is_array;
 use function is_object;
+use function is_string;
 use function is_user_logged_in;
 use function sanitize_key;
 use function sprintf;
 use function str_contains;
-use function TheFrosty\WpUtilities\getIpAddress;
 use function TheFrosty\WpUtilities\getRequest;
 use function time;
 use function wp_send_json;
+use const FILTER_VALIDATE_IP;
 use const MINUTE_IN_SECONDS;
 use const WP_CLI;
 
@@ -42,13 +48,32 @@ const NEVER_RATE_LIMITED_IPS = [
 ];
 
 /**
+ * Resolve the client IP without trusting client-supplied headers.
+ * Uses REMOTE_ADDR unless REMOTE_ADDR is a proxy registered via the `thefrosty/rate_limit/trusted_proxies`
+ * filter (IPs or CIDR ranges), in which case the X-Forwarded-For chain is walked by Symfony.
+ * @param Request $request
+ * @return string|null
+ */
+function getClientIp(Request $request): ?string
+{
+    $proxies = apply_filters('thefrosty/rate_limit/trusted_proxies', []);
+    if (is_array($proxies) && $proxies !== []) {
+        Request::setTrustedProxies(array_values(array_filter($proxies, 'is_string')), Request::HEADER_X_FORWARDED_FOR);
+    }
+
+    $ip = $request->getClientIp();
+
+    return is_string($ip) && filter_var($ip, FILTER_VALIDATE_IP) !== false ? $ip : null;
+}
+
+/**
  * Maybe send a Rate-Limit header and return a JSON 429 response.
  * @param Request|null $request
  */
 function maybeRateLimit(?Request $request = null): void
 {
     $request ??= getRequest();
-    $ip = getIpAddress($request);
+    $ip = getClientIp($request);
 
     if (
         // Wrap with function_exists in case we call this earlier then it's available.
