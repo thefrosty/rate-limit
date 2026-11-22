@@ -26,12 +26,17 @@
     "thefrosty/wp-utilities": "^3.11"
   },
   "require-dev": {
-    "phpunit/phpunit": "^12.0",
-    "roots/wordpress": "^6.7",
+    "phpunit/phpunit": "^11.5",
+    "roots/wordpress": "^7.0",
     "wp-phpunit/wp-phpunit": "^7.0",
     "yoast/phpunit-polyfills": "^4.0"
   },
+  "autoload-dev": {
+    "psr-4": {
+      "TheFrosty\\RateLimit\\Tests\\": "tests/unit/"
+    }
+  },
   "scripts": {
-    "test": "/vendor/bin/phpunit"
+    "test": "vendor/bin/phpunit"
   }
 }
