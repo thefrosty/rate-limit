@@ -16,7 +16,7 @@ final class RateLimitTest extends TestCase
 
         $data = get_transient(self::transientKey(self::CLIENT_IP));
         self::assertInstanceOf(stdClass::class, $data);
-        self::assertSame(0, $data->limits[self::CLIENT_IP]['count']);
+        self::assertSame(1, $data->limits[self::CLIENT_IP]['count']);
         self::assertEqualsWithDelta(time(), $data->limits[self::CLIENT_IP]['start_time'], 2);
     }
 
@@ -24,8 +24,7 @@ final class RateLimitTest extends TestCase
     {
         $allowed = self::allowedBeforeLimit(static fn(): Request => self::request());
 
-        // Current behaviour: the first request is counted as 0, so MAX + 1 requests get through.
-        self::assertSame(MAX_REQUESTS_PER_MINUTE + 1, $allowed);
+        self::assertSame(MAX_REQUESTS_PER_MINUTE, $allowed);
 
         $response = self::send(self::request());
         self::assertNotNull($response);
@@ -35,7 +34,7 @@ final class RateLimitTest extends TestCase
     public function test_html_clients_get_wp_die_429(): void
     {
         $factory = static fn(): Request => self::request('/', 'GET', ['HTTP_ACCEPT' => 'text/html']);
-        for ($i = 0; $i <= MAX_REQUESTS_PER_MINUTE; $i++) {
+        for ($i = 0; $i < MAX_REQUESTS_PER_MINUTE; $i++) {
             self::assertNull(self::send($factory()));
         }
 
@@ -61,6 +60,15 @@ final class RateLimitTest extends TestCase
         // A different client is unaffected by the first client being limited.
         self::assertNull(self::send(self::request(server: ['REMOTE_ADDR' => '198.51.100.7'])));
         self::assertNotFalse(get_transient(self::transientKey('198.51.100.7')));
+    }
+
+    public function test_ipv6_addresses_that_sanitize_alike_have_separate_buckets(): void
+    {
+        // sanitize_key() reduces both of these to "123", which used to put them in one bucket.
+        self::allowedBeforeLimit(static fn(): Request => self::request(server: ['REMOTE_ADDR' => '1:23::']));
+
+        self::assertNull(self::send(self::request(server: ['REMOTE_ADDR' => '12:3::'])));
+        self::assertSame(1, get_transient(self::transientKey('12:3::'))->limits['12:3::']['count']);
     }
 
     /**
@@ -113,7 +121,7 @@ final class RateLimitTest extends TestCase
     {
         wp_set_current_user(self::factory()->user->create(['role' => 'subscriber']));
 
-        self::assertSame(MAX_REQUESTS_PER_MINUTE + 1, self::allowedBeforeLimit(static fn(): Request => self::request()));
+        self::assertSame(MAX_REQUESTS_PER_MINUTE, self::allowedBeforeLimit(static fn(): Request => self::request()));
     }
 
     public function test_site_health_endpoint_is_not_limited(): void

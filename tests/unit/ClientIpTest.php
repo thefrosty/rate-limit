@@ -36,7 +36,7 @@ final class ClientIpTest extends TestCase
     {
         $allowed = self::allowedBeforeLimit(static fn(): Request => self::request(server: [$header => $value]));
 
-        self::assertLessThanOrEqual(MAX_REQUESTS_PER_MINUTE + 1, $allowed);
+        self::assertSame(MAX_REQUESTS_PER_MINUTE, $allowed);
     }
 
     public function test_rotating_forwarded_for_stays_in_one_bucket(): void
@@ -47,7 +47,7 @@ final class ClientIpTest extends TestCase
             return self::request(server: ['HTTP_X_FORWARDED_FOR' => "198.51.100.$i"]);
         };
 
-        self::assertLessThanOrEqual(MAX_REQUESTS_PER_MINUTE + 1, self::allowedBeforeLimit($factory));
+        self::assertSame(MAX_REQUESTS_PER_MINUTE, self::allowedBeforeLimit($factory));
         self::assertNotFalse(get_transient(self::transientKey(self::CLIENT_IP)));
         self::assertFalse(get_transient(self::transientKey('198.51.100.1')));
     }
